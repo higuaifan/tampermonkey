@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X.com 多视频播放器 + 内容管理器
 // @namespace    http://tampermonkey.net/
-// @version      5.2
-// @description  多视频播放 + 优雅的内容管理界面，可删除不需要的推文
+// @version      5.5
+// @description  多视频播放 + 优雅的内容管理界面，可删除不需要的推文，隐藏文本保留图片，隐藏推荐关注内容
 // @author       You
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -18,8 +18,12 @@
     const allowedPauses = new WeakSet();
     const userPausedVideos = new WeakSet();
     const deletedElements = new Set(); // 记录已删除的元素
+    const hiddenTextElements = new Set(); // 记录已隐藏文本的元素
+    const hiddenRecommendElements = new Set(); // 记录已隐藏推荐内容的元素
     
     let deleteMode = false;
+    let textHideMode = false; // 文本隐藏模式
+    let recommendHideMode = false; // 推荐内容隐藏模式
     let uiPanel = null;
     
     // === 视频播放功能（保持原有） ===
@@ -310,11 +314,41 @@
                 </div>
                 
                 <div class="feature-section">
+                    <h3>📝 文本管理</h3>
+                    <div class="button-group">
+                        <button class="control-btn text-hide-mode active" id="text-hide-mode">
+                            <span class="text-hide-icon">🙈</span>
+                            <span class="text-hide-text">退出隐藏</span>
+                        </button>
+                        <button class="control-btn restore-text" id="restore-text">恢复文本</button>
+                    </div>
+                    <div class="status">
+                        已隐藏: <span id="hidden-text-count">0</span> 条文本
+                    </div>
+                </div>
+                
+                <div class="feature-section">
+                    <h3>👥 推荐管理</h3>
+                    <div class="button-group">
+                        <button class="control-btn recommend-hide-mode active" id="recommend-hide-mode">
+                            <span class="recommend-hide-icon">✅</span>
+                            <span class="recommend-hide-text">退出隐藏</span>
+                        </button>
+                        <button class="control-btn restore-recommend" id="restore-recommend">恢复推荐</button>
+                    </div>
+                    <div class="status">
+                        已隐藏: <span id="hidden-recommend-count">0</span> 条推荐
+                    </div>
+                </div>
+                
+                <div class="feature-section">
                     <h3>⚡ 快捷操作</h3>
                     <div class="tips">
                         <div class="tip">• 点击视频播放/暂停</div>
                         <div class="tip">• 空格键暂停所有视频</div>
                         <div class="tip">• 点击红色按钮删除推文</div>
+                        <div class="tip">• 隐藏文本保留图片</div>
+                        <div class="tip">• 隐藏推荐关注内容</div>
                     </div>
                 </div>
             </div>
@@ -326,6 +360,14 @@
         deleteMode = true;
         document.body.classList.add('delete-mode-active');
         
+        // 默认启用文本隐藏模式
+        textHideMode = true;
+        document.body.classList.add('text-hide-mode-active');
+        
+        // 默认启用推荐隐藏模式
+        recommendHideMode = true;
+        document.body.classList.add('recommend-hide-mode-active');
+        
         // 绑定事件
         setupUIEvents();
         
@@ -336,6 +378,12 @@
         setTimeout(() => {
             addDeleteButtons();
         }, 500);
+        
+        // 延迟执行默认隐藏功能，确保页面加载完成
+        setTimeout(() => {
+            hideAllTexts();
+            hideAllRecommends();
+        }, 1000);
     }
     
     function setupUIEvents() {
@@ -410,6 +458,78 @@
             deletedElements.clear();
             updateStatus();
         });
+        
+        // 文本隐藏模式切换
+        document.getElementById('text-hide-mode').addEventListener('click', () => {
+            textHideMode = !textHideMode;
+            const btn = document.getElementById('text-hide-mode');
+            const icon = btn.querySelector('.text-hide-icon');
+            const text = btn.querySelector('.text-hide-text');
+            
+            if (textHideMode) {
+                btn.classList.add('active');
+                icon.textContent = '🙈';
+                text.textContent = '退出隐藏';
+                document.body.classList.add('text-hide-mode-active');
+                hideAllTexts();
+                showTextHideHint();
+            } else {
+                btn.classList.remove('active');
+                icon.textContent = '👁️';
+                text.textContent = '隐藏文本';
+                document.body.classList.remove('text-hide-mode-active');
+                restoreAllTexts();
+                hideTextHideHint();
+            }
+        });
+        
+        // 恢复所有文本
+        document.getElementById('restore-text').addEventListener('click', () => {
+            hiddenTextElements.forEach(element => {
+                if (element.parentNode) {
+                    element.style.display = '';
+                    element.classList.remove('hidden-text');
+                }
+            });
+            hiddenTextElements.clear();
+            updateStatus();
+        });
+        
+        // 推荐内容隐藏模式切换
+        document.getElementById('recommend-hide-mode').addEventListener('click', () => {
+            recommendHideMode = !recommendHideMode;
+            const btn = document.getElementById('recommend-hide-mode');
+            const icon = btn.querySelector('.recommend-hide-icon');
+            const text = btn.querySelector('.recommend-hide-text');
+            
+            if (recommendHideMode) {
+                btn.classList.add('active');
+                icon.textContent = '✅';
+                text.textContent = '退出隐藏';
+                document.body.classList.add('recommend-hide-mode-active');
+                hideAllRecommends();
+                showRecommendHideHint();
+            } else {
+                btn.classList.remove('active');
+                icon.textContent = '🚫';
+                text.textContent = '隐藏推荐';
+                document.body.classList.remove('recommend-hide-mode-active');
+                restoreAllRecommends();
+                hideRecommendHideHint();
+            }
+        });
+        
+        // 恢复所有推荐内容
+        document.getElementById('restore-recommend').addEventListener('click', () => {
+            hiddenRecommendElements.forEach(element => {
+                if (element.parentNode) {
+                    element.style.display = '';
+                    element.classList.remove('hidden-recommend');
+                }
+            });
+            hiddenRecommendElements.clear();
+            updateStatus();
+        });
     }
     
     function handleDeleteButtonClick(e) {
@@ -435,6 +555,201 @@
             
             e.preventDefault();
             e.stopPropagation();
+        }
+    }
+    
+    function hideAllTexts() {
+        // 隐藏所有推文中的文本内容，但保留图片和视频
+        const tweets = document.querySelectorAll('article[data-testid="tweet"], article[role="article"]');
+        tweets.forEach(tweet => {
+            if (!hiddenTextElements.has(tweet)) {
+                // 查找推文文本容器
+                const textContainer = tweet.querySelector('[data-testid="tweetText"]');
+                if (textContainer) {
+                    // 检查是否包含图片或视频
+                    const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
+                    
+                    if (hasMedia) {
+                        // 隐藏文本但保留媒体
+                        textContainer.style.display = 'none';
+                        textContainer.classList.add('hidden-text');
+                        hiddenTextElements.add(tweet);
+                    }
+                }
+            }
+        });
+        
+        // 启动监控新推文的出现
+        startTextHideObserver();
+    }
+    
+    function restoreAllTexts() {
+        // 恢复所有隐藏的文本
+        hiddenTextElements.forEach(tweet => {
+            const textContainer = tweet.querySelector('[data-testid="tweetText"]');
+            if (textContainer) {
+                textContainer.style.display = '';
+                textContainer.classList.remove('hidden-text');
+            }
+        });
+        hiddenTextElements.clear();
+        
+        // 停止监控
+        stopTextHideObserver();
+    }
+    
+    function startTextHideObserver() {
+        // 避免重复创建监控器
+        if (window.textHideObserver) {
+            return;
+        }
+        
+        window.textHideObserver = new MutationObserver(() => {
+            if (textHideMode) {
+                setTimeout(() => {
+                    const newTweets = document.querySelectorAll('article[data-testid="tweet"], article[role="article"]');
+                    newTweets.forEach(tweet => {
+                        if (!hiddenTextElements.has(tweet)) {
+                            const textContainer = tweet.querySelector('[data-testid="tweetText"]');
+                            if (textContainer) {
+                                const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
+                                if (hasMedia) {
+                                    textContainer.style.display = 'none';
+                                    textContainer.classList.add('hidden-text');
+                                    hiddenTextElements.add(tweet);
+                                }
+                            }
+                        }
+                    });
+                }, 100);
+            }
+        });
+        
+        if (document.body) {
+            window.textHideObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+    
+    function stopTextHideObserver() {
+        if (window.textHideObserver) {
+            window.textHideObserver.disconnect();
+            window.textHideObserver = null;
+        }
+    }
+    
+    function hideAllRecommends() {
+        // 隐藏所有推荐关注和"显示更多"内容
+        const recommendSelectors = [
+            '[data-testid="cellInnerDiv"]:has([data-testid="UserCell"])', // 推荐关注
+            '[data-testid="cellInnerDiv"]:has(a[href*="connect_people"])', // 显示更多
+            '[data-testid="cellInnerDiv"]:has(a[href*="who_to_follow"])', // 推荐关注
+            '[data-testid="cellInnerDiv"]:has(a[href*="trends"])', // 趋势推荐
+            '[data-testid="cellInnerDiv"]:has(a[href*="i/connect_people"])' // 显示更多
+        ];
+        
+        recommendSelectors.forEach(selector => {
+            try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach(element => {
+                    if (!hiddenRecommendElements.has(element)) {
+                        // 检查是否包含推荐内容
+                        const hasUserCell = element.querySelector('[data-testid="UserCell"]');
+                        const hasConnectLink = element.querySelector('a[href*="connect_people"]');
+                        const hasWhoToFollow = element.querySelector('a[href*="who_to_follow"]');
+                        const hasTrends = element.querySelector('a[href*="trends"]');
+                        
+                        if (hasUserCell || hasConnectLink || hasWhoToFollow || hasTrends) {
+                            element.style.display = 'none';
+                            element.classList.add('hidden-recommend');
+                            hiddenRecommendElements.add(element);
+                        }
+                    }
+                });
+            } catch (e) {
+                // 忽略CSS选择器不支持的错误
+            }
+        });
+        
+        // 使用更通用的方法查找推荐内容
+        const allCells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
+        allCells.forEach(cell => {
+            if (!hiddenRecommendElements.has(cell)) {
+                const userCell = cell.querySelector('[data-testid="UserCell"]');
+                const connectLink = cell.querySelector('a[href*="connect_people"]');
+                const whoToFollow = cell.querySelector('a[href*="who_to_follow"]');
+                const trends = cell.querySelector('a[href*="trends"]');
+                const showMore = cell.querySelector('a[href*="i/connect_people"]');
+                
+                if (userCell || connectLink || whoToFollow || trends || showMore) {
+                    cell.style.display = 'none';
+                    cell.classList.add('hidden-recommend');
+                    hiddenRecommendElements.add(cell);
+                }
+            }
+        });
+        
+        // 启动监控新推荐内容的出现
+        startRecommendHideObserver();
+    }
+    
+    function restoreAllRecommends() {
+        // 恢复所有隐藏的推荐内容
+        hiddenRecommendElements.forEach(element => {
+            if (element.parentNode) {
+                element.style.display = '';
+                element.classList.remove('hidden-recommend');
+            }
+        });
+        hiddenRecommendElements.clear();
+        
+        // 停止监控
+        stopRecommendHideObserver();
+    }
+    
+    function startRecommendHideObserver() {
+        // 避免重复创建监控器
+        if (window.recommendHideObserver) {
+            return;
+        }
+        
+        window.recommendHideObserver = new MutationObserver(() => {
+            if (recommendHideMode) {
+                setTimeout(() => {
+                    const newCells = document.querySelectorAll('[data-testid="cellInnerDiv"]');
+                    newCells.forEach(cell => {
+                        if (!hiddenRecommendElements.has(cell)) {
+                            const userCell = cell.querySelector('[data-testid="UserCell"]');
+                            const connectLink = cell.querySelector('a[href*="connect_people"]');
+                            const whoToFollow = cell.querySelector('a[href*="who_to_follow"]');
+                            const trends = cell.querySelector('a[href*="trends"]');
+                            const showMore = cell.querySelector('a[href*="i/connect_people"]');
+                            
+                            if (userCell || connectLink || whoToFollow || trends || showMore) {
+                                cell.style.display = 'none';
+                                cell.classList.add('hidden-recommend');
+                                hiddenRecommendElements.add(cell);
+                            }
+                        }
+                    });
+                }, 100);
+            }
+        });
+        
+        if (document.body) {
+            window.recommendHideObserver.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        }
+    }
+    
+    function stopRecommendHideObserver() {
+        if (window.recommendHideObserver) {
+            window.recommendHideObserver.disconnect();
+            window.recommendHideObserver = null;
         }
     }
     
@@ -507,6 +822,12 @@
         
         // 更新删除计数
         document.getElementById('deleted-count').textContent = deletedElements.size;
+        
+        // 更新隐藏文本计数
+        document.getElementById('hidden-text-count').textContent = hiddenTextElements.size;
+        
+        // 更新隐藏推荐内容计数
+        document.getElementById('hidden-recommend-count').textContent = hiddenRecommendElements.size;
     }
     
     function showDeleteHint() {
@@ -566,6 +887,98 @@
             success.classList.remove('show');
             setTimeout(() => success.remove(), 300);
         }, 2000);
+    }
+    
+    function showTextHideHint() {
+        // 检查是否已存在提示
+        if (document.getElementById('text-hide-hint')) {
+            return;
+        }
+        
+        const hint = document.createElement('div');
+        hint.id = 'text-hide-hint';
+        hint.innerHTML = `
+            <div class="hint-content">
+                <span class="hint-icon">👁️</span>
+                <span class="hint-text">已隐藏包含媒体的推文文本</span>
+                <button class="hint-close" id="text-hide-hint-close">×</button>
+            </div>
+        `;
+        document.body.appendChild(hint);
+        
+        // 绑定关闭事件
+        document.getElementById('text-hide-hint-close').addEventListener('click', () => {
+            hint.remove();
+        });
+        
+        setTimeout(() => {
+            hint.classList.add('show');
+        }, 100);
+        
+        // 5秒后自动关闭
+        setTimeout(() => {
+            if (hint.parentNode) {
+                hint.classList.remove('show');
+                setTimeout(() => {
+                    if (hint.parentNode) {
+                        hint.remove();
+                    }
+                }, 300);
+            }
+        }, 5000);
+    }
+    
+    function hideTextHideHint() {
+        const hint = document.getElementById('text-hide-hint');
+        if (hint) {
+            hint.remove();
+        }
+    }
+    
+    function showRecommendHideHint() {
+        // 检查是否已存在提示
+        if (document.getElementById('recommend-hide-hint')) {
+            return;
+        }
+        
+        const hint = document.createElement('div');
+        hint.id = 'recommend-hide-hint';
+        hint.innerHTML = `
+            <div class="hint-content">
+                <span class="hint-icon">🚫</span>
+                <span class="hint-text">已隐藏推荐关注和"显示更多"内容</span>
+                <button class="hint-close" id="recommend-hide-hint-close">×</button>
+            </div>
+        `;
+        document.body.appendChild(hint);
+        
+        // 绑定关闭事件
+        document.getElementById('recommend-hide-hint-close').addEventListener('click', () => {
+            hint.remove();
+        });
+        
+        setTimeout(() => {
+            hint.classList.add('show');
+        }, 100);
+        
+        // 5秒后自动关闭
+        setTimeout(() => {
+            if (hint.parentNode) {
+                hint.classList.remove('show');
+                setTimeout(() => {
+                    if (hint.parentNode) {
+                        hint.remove();
+                    }
+                }, 300);
+            }
+        }, 5000);
+    }
+    
+    function hideRecommendHideHint() {
+        const hint = document.getElementById('recommend-hide-hint');
+        if (hint) {
+            hint.remove();
+        }
     }
     
     function addStyles() {
@@ -869,6 +1282,37 @@
             .hint-close:hover {
                 color: #fff;
             }
+            
+            /* 文本隐藏模式样式 */
+            .text-hide-mode-active [data-testid="tweetText"].hidden-text {
+                display: none !important;
+            }
+            
+            .control-btn.text-hide-mode {
+                background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            }
+            
+            .control-btn.text-hide-mode.active {
+                background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+                box-shadow: 0 0 15px rgba(230, 126, 34, 0.3);
+            }
+            
+            .control-btn.restore-text {
+                background: linear-gradient(135deg, #1abc9c 0%, #16a085 100%);
+            }
+            
+            .control-btn.recommend-hide-mode {
+                background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
+            }
+            
+            .control-btn.recommend-hide-mode.active {
+                background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+                box-shadow: 0 0 15px rgba(39, 174, 96, 0.3);
+            }
+            
+            .control-btn.restore-recommend {
+                background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            }
         `;
         document.head.appendChild(style);
     }
@@ -896,7 +1340,7 @@
     
     // 简化的调试接口
     window.multiVideoPlayer = {
-        version: '5.2',
+        version: '5.5',
         playAll: () => {
             document.querySelectorAll('video').forEach(video => {
                 userPausedVideos.delete(video);
@@ -920,7 +1364,9 @@
                 total: videos.length, 
                 playing, 
                 paused, 
-                deleted: deletedElements.size 
+                deleted: deletedElements.size,
+                hiddenText: hiddenTextElements.size,
+                hiddenRecommend: hiddenRecommendElements.size
             };
         },
         toggleDeleteMode: () => {
@@ -928,6 +1374,18 @@
         },
         restoreAll: () => {
             document.getElementById('restore-all').click();
+        },
+        toggleTextHideMode: () => {
+            document.getElementById('text-hide-mode').click();
+        },
+        restoreAllTexts: () => {
+            document.getElementById('restore-text').click();
+        },
+        toggleRecommendHideMode: () => {
+            document.getElementById('recommend-hide-mode').click();
+        },
+        restoreAllRecommends: () => {
+            document.getElementById('restore-recommend').click();
         }
     };
     
