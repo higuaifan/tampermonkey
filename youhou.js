@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         X.com 多视频播放器 + 内容管理器
 // @namespace    http://tampermonkey.net/
-// @version      5.5
-// @description  多视频播放 + 优雅的内容管理界面，可删除不需要的推文，隐藏文本保留图片，隐藏推荐关注内容
+// @version      5.8
+// @description  多视频播放 + 循环播放 + 自动滚动 + 优雅的内容管理界面，可删除不需要的推文，隐藏文本保留图片，隐藏推荐关注内容
 // @author       You
 // @match        https://x.com/*
 // @match        https://twitter.com/*
@@ -24,6 +24,10 @@
     let deleteMode = false;
     let textHideMode = false; // 文本隐藏模式
     let recommendHideMode = false; // 推荐内容隐藏模式
+    let loopMode = true; // 视频循环模式
+    let autoScrollMode = false; // 自动滚动模式
+    let scrollInterval = null; // 滚动计时器
+    let scrollSpeed = 5; // 滚动速度（像素/次）
     let uiPanel = null;
     
     // === 视频播放功能（保持原有） ===
@@ -184,22 +188,27 @@
             document.querySelectorAll('video').forEach(video => {
                 if (!video.hasAttribute('data-processed')) {
                     video.setAttribute('data-processed', 'true');
-                    
+
+                    // 如果循环模式开启，设置video的loop属性
+                    if (loopMode) {
+                        video.loop = true;
+                    }
+
                     const tryAutoPlay = () => {
                         if (video.readyState >= 2 && video.paused && !userPausedVideos.has(video)) {
                             const rect = video.getBoundingClientRect();
                             const isVisible = rect.top < window.innerHeight && rect.bottom > 0;
-                            
+
                             if (isVisible) {
                                 video.play().catch(e => {});
                             }
                         }
                     };
-                    
+
                     video.addEventListener('loadeddata', tryAutoPlay);
                     video.addEventListener('canplay', tryAutoPlay);
                     video.addEventListener('loadedmetadata', tryAutoPlay);
-                    
+
                     setTimeout(tryAutoPlay, 500);
                     setTimeout(tryAutoPlay, 1000);
                 }
@@ -294,8 +303,28 @@
                         <button class="control-btn play-all" id="play-all">播放全部</button>
                         <button class="control-btn pause-all" id="pause-all">暂停全部</button>
                     </div>
+                    <div class="button-group">
+                        <button class="control-btn loop-mode" id="loop-mode">
+                            <span class="loop-icon">🔁</span>
+                            <span class="loop-text">开启循环</span>
+                        </button>
+                        <button class="control-btn auto-scroll" id="auto-scroll">
+                            <span class="scroll-icon">📜</span>
+                            <span class="scroll-text">自动滚动</span>
+                        </button>
+                    </div>
+                    <div class="scroll-controls" id="scroll-controls" style="display: none;">
+                        <label class="speed-label">滚动速度:</label>
+                        <div class="speed-buttons">
+                            <button class="speed-btn" data-speed="1">慢</button>
+                            <button class="speed-btn active" data-speed="5">中</button>
+                            <button class="speed-btn" data-speed="10">快</button>
+                        </div>
+                        <input type="range" id="speed-slider" min="1" max="20" value="5" class="speed-slider">
+                        <span class="speed-display" id="speed-display">5px/次</span>
+                    </div>
                     <div class="status" id="video-status">
-                        视频: <span id="video-count">0</span> 个
+                        视频: <span id="video-count">0</span> 个 | 循环: <span id="loop-status">关闭</span> | 滚动: <span id="scroll-status">关闭</span>
                     </div>
                 </div>
                 
@@ -367,6 +396,14 @@
         // 默认启用推荐隐藏模式
         recommendHideMode = true;
         document.body.classList.add('recommend-hide-mode-active');
+
+        // 默认启用循环模式，设置按钮状态
+        const loopBtn = document.getElementById('loop-mode');
+        loopBtn.classList.add('active');
+        const loopIcon = loopBtn.querySelector('.loop-icon');
+        const loopText = loopBtn.querySelector('.loop-text');
+        loopIcon.textContent = '🔄';
+        loopText.textContent = '关闭循环';
         
         // 绑定事件
         setupUIEvents();
@@ -421,7 +458,79 @@
                 video.pause();
             });
         });
-        
+
+        // 循环模式切换
+        document.getElementById('loop-mode').addEventListener('click', () => {
+            loopMode = !loopMode;
+            const btn = document.getElementById('loop-mode');
+            const icon = btn.querySelector('.loop-icon');
+            const text = btn.querySelector('.loop-text');
+
+            if (loopMode) {
+                btn.classList.add('active');
+                icon.textContent = '🔄';
+                text.textContent = '关闭循环';
+                // 给所有现有视频设置循环
+                document.querySelectorAll('video').forEach(video => {
+                    video.loop = true;
+                });
+            } else {
+                btn.classList.remove('active');
+                icon.textContent = '🔁';
+                text.textContent = '开启循环';
+                // 移除所有视频的循环
+                document.querySelectorAll('video').forEach(video => {
+                    video.loop = false;
+                });
+            }
+            updateStatus();
+        });
+
+        // 自动滚动模式切换
+        document.getElementById('auto-scroll').addEventListener('click', () => {
+            autoScrollMode = !autoScrollMode;
+            const btn = document.getElementById('auto-scroll');
+            const icon = btn.querySelector('.scroll-icon');
+            const text = btn.querySelector('.scroll-text');
+
+            if (autoScrollMode) {
+                btn.classList.add('active');
+                icon.textContent = '⏸️';
+                text.textContent = '停止滚动';
+                document.getElementById('scroll-controls').style.display = 'block';
+                startAutoScroll();
+            } else {
+                btn.classList.remove('active');
+                icon.textContent = '📜';
+                text.textContent = '自动滚动';
+                document.getElementById('scroll-controls').style.display = 'none';
+                stopAutoScroll();
+            }
+            updateStatus();
+        });
+
+        // 滚动速度控制
+        const speedButtons = document.querySelectorAll('.speed-btn');
+        speedButtons.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const speed = parseInt(btn.dataset.speed);
+                setScrollSpeed(speed);
+                speedButtons.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+            });
+        });
+
+        const speedSlider = document.getElementById('speed-slider');
+        speedSlider.addEventListener('input', (e) => {
+            const speed = parseInt(e.target.value);
+            setScrollSpeed(speed);
+            // 更新按钮状态
+            speedButtons.forEach(b => b.classList.remove('active'));
+            if (speed === 1) speedButtons[0].classList.add('active');
+            else if (speed === 5) speedButtons[1].classList.add('active');
+            else if (speed === 10) speedButtons[2].classList.add('active');
+        });
+
         // 删除模式切换
         document.getElementById('delete-mode').addEventListener('click', () => {
             deleteMode = !deleteMode;
@@ -668,8 +777,9 @@
                         }
                     }
                 });
-            } catch (e) {
+            } catch (error) {
                 // 忽略CSS选择器不支持的错误
+                console.warn('Selector error:', error);
             }
         });
         
@@ -813,19 +923,61 @@
         // 停止监控
         stopDeleteButtonObserver();
     }
-    
+
+    // === 自动滚动功能 ===
+
+    function startAutoScroll() {
+        // 清除之前的滚动计时器
+        if (scrollInterval) {
+            clearInterval(scrollInterval);
+        }
+
+        scrollInterval = setInterval(() => {
+            // 根据设置的速度滚动
+            window.scrollBy({
+                top: scrollSpeed,
+                left: 0,
+                behavior: 'smooth'
+            });
+        }, 50); // 每50毫秒滚动一次，实现平滑缓慢滚动
+    }
+
+    function stopAutoScroll() {
+        if (scrollInterval) {
+            clearInterval(scrollInterval);
+            scrollInterval = null;
+        }
+    }
+
+    function setScrollSpeed(speed) {
+        scrollSpeed = speed;
+        document.getElementById('speed-display').textContent = `${speed}px/次`;
+        document.getElementById('speed-slider').value = speed;
+
+        // 如果正在滚动，重启以应用新速度
+        if (autoScrollMode) {
+            stopAutoScroll();
+            startAutoScroll();
+        }
+    }
+
     function updateStatus() {
         // 更新视频状态
         const videos = document.querySelectorAll('video');
-        const playing = Array.from(videos).filter(v => !v.paused).length;
         document.getElementById('video-count').textContent = videos.length;
-        
+
+        // 更新循环状态
+        document.getElementById('loop-status').textContent = loopMode ? '开启' : '关闭';
+
+        // 更新滚动状态
+        document.getElementById('scroll-status').textContent = autoScrollMode ? '开启' : '关闭';
+
         // 更新删除计数
         document.getElementById('deleted-count').textContent = deletedElements.size;
-        
+
         // 更新隐藏文本计数
         document.getElementById('hidden-text-count').textContent = hiddenTextElements.size;
-        
+
         // 更新隐藏推荐内容计数
         document.getElementById('hidden-recommend-count').textContent = hiddenRecommendElements.size;
     }
@@ -1142,7 +1294,109 @@
             .control-btn.pause-all {
                 background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
             }
-            
+
+            .control-btn.loop-mode {
+                background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            }
+
+            .control-btn.loop-mode.active {
+                background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+                box-shadow: 0 0 15px rgba(231, 76, 60, 0.3);
+            }
+
+            .control-btn.auto-scroll {
+                background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            }
+
+            .control-btn.auto-scroll.active {
+                background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+                box-shadow: 0 0 15px rgba(243, 156, 18, 0.3);
+            }
+
+            .scroll-controls {
+                margin: 10px 0;
+                padding: 12px;
+                background: rgba(255, 255, 255, 0.05);
+                border-radius: 8px;
+                border: 1px solid #444;
+            }
+
+            .speed-label {
+                display: block;
+                color: #ccc;
+                font-size: 12px;
+                margin-bottom: 8px;
+                font-weight: 500;
+            }
+
+            .speed-buttons {
+                display: flex;
+                gap: 6px;
+                margin-bottom: 10px;
+            }
+
+            .speed-btn {
+                flex: 1;
+                padding: 6px 8px;
+                border: none;
+                border-radius: 4px;
+                background: rgba(255, 255, 255, 0.1);
+                color: #ccc;
+                font-size: 11px;
+                cursor: pointer;
+                transition: all 0.2s ease;
+            }
+
+            .speed-btn:hover {
+                background: rgba(255, 255, 255, 0.2);
+                color: #fff;
+            }
+
+            .speed-btn.active {
+                background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                color: #fff;
+                box-shadow: 0 0 8px rgba(52, 152, 219, 0.3);
+            }
+
+            .speed-slider {
+                width: 100%;
+                height: 4px;
+                border-radius: 2px;
+                background: #444;
+                outline: none;
+                margin: 8px 0;
+                -webkit-appearance: none;
+            }
+
+            .speed-slider::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                cursor: pointer;
+                box-shadow: 0 0 6px rgba(52, 152, 219, 0.3);
+            }
+
+            .speed-slider::-moz-range-thumb {
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+                cursor: pointer;
+                border: none;
+                box-shadow: 0 0 6px rgba(52, 152, 219, 0.3);
+            }
+
+            .speed-display {
+                display: block;
+                text-align: center;
+                color: #3498db;
+                font-size: 11px;
+                font-weight: 600;
+                margin-top: 6px;
+            }
+
             .control-btn.restore-all {
                 background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
             }
@@ -1340,7 +1594,7 @@
     
     // 简化的调试接口
     window.multiVideoPlayer = {
-        version: '5.5',
+        version: '5.8',
         playAll: () => {
             document.querySelectorAll('video').forEach(video => {
                 userPausedVideos.delete(video);
@@ -1356,14 +1610,41 @@
                 video.pause();
             });
         },
+        toggleLoop: () => {
+            document.getElementById('loop-mode').click();
+        },
+        setLoop: (enabled) => {
+            if (loopMode !== enabled) {
+                document.getElementById('loop-mode').click();
+            }
+        },
+        toggleAutoScroll: () => {
+            document.getElementById('auto-scroll').click();
+        },
+        setAutoScroll: (enabled) => {
+            if (autoScrollMode !== enabled) {
+                document.getElementById('auto-scroll').click();
+            }
+        },
+        setScrollSpeed: (speed) => {
+            setScrollSpeed(speed);
+        },
+        getScrollSpeed: () => {
+            return scrollSpeed;
+        },
         stats: () => {
             const videos = document.querySelectorAll('video');
             const playing = Array.from(videos).filter(v => !v.paused).length;
+            const looping = Array.from(videos).filter(v => v.loop).length;
             const paused = videos.length - playing;
-            return { 
-                total: videos.length, 
-                playing, 
-                paused, 
+            return {
+                total: videos.length,
+                playing,
+                paused,
+                looping,
+                loopMode: loopMode,
+                autoScrollMode: autoScrollMode,
+                scrollSpeed: scrollSpeed,
                 deleted: deletedElements.size,
                 hiddenText: hiddenTextElements.size,
                 hiddenRecommend: hiddenRecommendElements.size
