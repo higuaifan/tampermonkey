@@ -26,6 +26,7 @@
     let recommendHideMode = false; // 推荐内容隐藏模式
     let loopMode = true; // 视频循环模式
     let autoScrollMode = false; // 自动滚动模式
+    let muteMode = true; // 默认静音模式
     let scrollInterval = null; // 滚动计时器
     let scrollSpeed = 5; // 滚动速度（像素/次）
     let uiPanel = null;
@@ -194,6 +195,11 @@
                         video.loop = true;
                     }
 
+                    // 如果静音模式开启，设置video的muted属性
+                    if (muteMode) {
+                        video.muted = true;
+                    }
+
                     const tryAutoPlay = () => {
                         if (video.readyState >= 2 && video.paused && !userPausedVideos.has(video)) {
                             const rect = video.getBoundingClientRect();
@@ -304,10 +310,20 @@
                         <button class="control-btn pause-all" id="pause-all">暂停全部</button>
                     </div>
                     <div class="button-group">
+                        <button class="control-btn mute-all" id="mute-all">静音全部</button>
+                        <button class="control-btn unmute-all" id="unmute-all">取消静音</button>
+                    </div>
+                    <div class="button-group">
                         <button class="control-btn loop-mode" id="loop-mode">
                             <span class="loop-icon">🔁</span>
                             <span class="loop-text">开启循环</span>
                         </button>
+                        <button class="control-btn mute-mode" id="mute-mode">
+                            <span class="mute-icon">🔇</span>
+                            <span class="mute-text">默认静音</span>
+                        </button>
+                    </div>
+                    <div class="button-group">
                         <button class="control-btn auto-scroll" id="auto-scroll">
                             <span class="scroll-icon">📜</span>
                             <span class="scroll-text">自动滚动</span>
@@ -324,7 +340,7 @@
                         <span class="speed-display" id="speed-display">5px/次</span>
                     </div>
                     <div class="status" id="video-status">
-                        视频: <span id="video-count">0</span> 个 | 循环: <span id="loop-status">关闭</span> | 滚动: <span id="scroll-status">关闭</span>
+                        视频: <span id="video-count">0</span> 个 | 循环: <span id="loop-status">关闭</span> | 静音: <span id="mute-status">开启</span> | 滚动: <span id="scroll-status">关闭</span>
                     </div>
                 </div>
                 
@@ -404,7 +420,15 @@
         const loopText = loopBtn.querySelector('.loop-text');
         loopIcon.textContent = '🔄';
         loopText.textContent = '关闭循环';
-        
+
+        // 默认启用静音模式，设置按钮状态
+        const muteBtn = document.getElementById('mute-mode');
+        muteBtn.classList.add('active');
+        const muteIcon = muteBtn.querySelector('.mute-icon');
+        const muteText = muteBtn.querySelector('.mute-text');
+        muteIcon.textContent = '🔊';
+        muteText.textContent = '关闭静音';
+
         // 绑定事件
         setupUIEvents();
         
@@ -459,6 +483,20 @@
             });
         });
 
+        // 静音全部视频
+        document.getElementById('mute-all').addEventListener('click', () => {
+            document.querySelectorAll('video').forEach(video => {
+                video.muted = true;
+            });
+        });
+
+        // 取消静音全部视频
+        document.getElementById('unmute-all').addEventListener('click', () => {
+            document.querySelectorAll('video').forEach(video => {
+                video.muted = false;
+            });
+        });
+
         // 循环模式切换
         document.getElementById('loop-mode').addEventListener('click', () => {
             loopMode = !loopMode;
@@ -481,6 +519,33 @@
                 // 移除所有视频的循环
                 document.querySelectorAll('video').forEach(video => {
                     video.loop = false;
+                });
+            }
+            updateStatus();
+        });
+
+        // 静音模式切换
+        document.getElementById('mute-mode').addEventListener('click', () => {
+            muteMode = !muteMode;
+            const btn = document.getElementById('mute-mode');
+            const icon = btn.querySelector('.mute-icon');
+            const text = btn.querySelector('.mute-text');
+
+            if (muteMode) {
+                btn.classList.add('active');
+                icon.textContent = '🔊';
+                text.textContent = '关闭静音';
+                // 给所有现有视频设置静音
+                document.querySelectorAll('video').forEach(video => {
+                    video.muted = true;
+                });
+            } else {
+                btn.classList.remove('active');
+                icon.textContent = '🔇';
+                text.textContent = '默认静音';
+                // 取消所有视频的静音
+                document.querySelectorAll('video').forEach(video => {
+                    video.muted = false;
                 });
             }
             updateStatus();
@@ -594,10 +659,20 @@
         
         // 恢复所有文本
         document.getElementById('restore-text').addEventListener('click', () => {
-            hiddenTextElements.forEach(element => {
-                if (element.parentNode) {
-                    element.style.display = '';
-                    element.classList.remove('hidden-text');
+            hiddenTextElements.forEach(tweet => {
+                if (tweet.parentNode) {
+                    if (tweet.classList.contains('hidden-text-full')) {
+                        // 恢复整个推文
+                        tweet.style.display = '';
+                        tweet.classList.remove('hidden-text-full');
+                    } else {
+                        // 恢复文本容器
+                        const textContainer = tweet.querySelector('[data-testid="tweetText"]');
+                        if (textContainer) {
+                            textContainer.style.display = '';
+                            textContainer.classList.remove('hidden-text');
+                        }
+                    }
                 }
             });
             hiddenTextElements.clear();
@@ -668,41 +743,51 @@
     }
     
     function hideAllTexts() {
-        // 隐藏所有推文中的文本内容，但保留图片和视频
+        // 1. 纯文本推文 → 隐藏整个推文
+        // 2. 有媒体的推文 → 只隐藏文本部分
         const tweets = document.querySelectorAll('article[data-testid="tweet"], article[role="article"]');
         tweets.forEach(tweet => {
             if (!hiddenTextElements.has(tweet)) {
-                // 查找推文文本容器
+                // 检查是否包含图片或视频
+                const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
                 const textContainer = tweet.querySelector('[data-testid="tweetText"]');
-                if (textContainer) {
-                    // 检查是否包含图片或视频
-                    const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
-                    
-                    if (hasMedia) {
-                        // 隐藏文本但保留媒体
-                        textContainer.style.display = 'none';
-                        textContainer.classList.add('hidden-text');
-                        hiddenTextElements.add(tweet);
-                    }
+
+                if (!hasMedia && textContainer) {
+                    // 情况1: 纯文本推文，隐藏整个推文
+                    tweet.style.display = 'none';
+                    tweet.classList.add('hidden-text-full');
+                    hiddenTextElements.add(tweet);
+                } else if (hasMedia && textContainer) {
+                    // 情况2: 有媒体的推文，只隐藏文本
+                    textContainer.style.display = 'none';
+                    textContainer.classList.add('hidden-text');
+                    hiddenTextElements.add(tweet);
                 }
             }
         });
-        
+
         // 启动监控新推文的出现
         startTextHideObserver();
     }
     
     function restoreAllTexts() {
-        // 恢复所有隐藏的文本
+        // 恢复所有隐藏的内容
         hiddenTextElements.forEach(tweet => {
-            const textContainer = tweet.querySelector('[data-testid="tweetText"]');
-            if (textContainer) {
-                textContainer.style.display = '';
-                textContainer.classList.remove('hidden-text');
+            if (tweet.classList.contains('hidden-text-full')) {
+                // 恢复整个推文
+                tweet.style.display = '';
+                tweet.classList.remove('hidden-text-full');
+            } else {
+                // 恢复文本容器
+                const textContainer = tweet.querySelector('[data-testid="tweetText"]');
+                if (textContainer) {
+                    textContainer.style.display = '';
+                    textContainer.classList.remove('hidden-text');
+                }
             }
         });
         hiddenTextElements.clear();
-        
+
         // 停止监控
         stopTextHideObserver();
     }
@@ -719,14 +804,20 @@
                     const newTweets = document.querySelectorAll('article[data-testid="tweet"], article[role="article"]');
                     newTweets.forEach(tweet => {
                         if (!hiddenTextElements.has(tweet)) {
+                            // 检查是否包含图片或视频
+                            const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
                             const textContainer = tweet.querySelector('[data-testid="tweetText"]');
-                            if (textContainer) {
-                                const hasMedia = tweet.querySelector('[data-testid="tweetPhoto"], video, [data-testid="videoPlayer"]');
-                                if (hasMedia) {
-                                    textContainer.style.display = 'none';
-                                    textContainer.classList.add('hidden-text');
-                                    hiddenTextElements.add(tweet);
-                                }
+
+                            if (!hasMedia && textContainer) {
+                                // 情况1: 纯文本推文，隐藏整个推文
+                                tweet.style.display = 'none';
+                                tweet.classList.add('hidden-text-full');
+                                hiddenTextElements.add(tweet);
+                            } else if (hasMedia && textContainer) {
+                                // 情况2: 有媒体的推文，只隐藏文本
+                                textContainer.style.display = 'none';
+                                textContainer.classList.add('hidden-text');
+                                hiddenTextElements.add(tweet);
                             }
                         }
                     });
@@ -968,6 +1059,9 @@
 
         // 更新循环状态
         document.getElementById('loop-status').textContent = loopMode ? '开启' : '关闭';
+
+        // 更新静音状态
+        document.getElementById('mute-status').textContent = muteMode ? '开启' : '关闭';
 
         // 更新滚动状态
         document.getElementById('scroll-status').textContent = autoScrollMode ? '开启' : '关闭';
@@ -1295,8 +1389,25 @@
                 background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
             }
 
+            .control-btn.mute-all {
+                background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            }
+
+            .control-btn.unmute-all {
+                background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
+            }
+
             .control-btn.loop-mode {
                 background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
+            }
+
+            .control-btn.mute-mode {
+                background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+            }
+
+            .control-btn.mute-mode.active {
+                background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+                box-shadow: 0 0 15px rgba(243, 156, 18, 0.3);
             }
 
             .control-btn.loop-mode.active {
@@ -1632,17 +1743,34 @@
         getScrollSpeed: () => {
             return scrollSpeed;
         },
+        muteAll: () => {
+            document.getElementById('mute-all').click();
+        },
+        unmuteAll: () => {
+            document.getElementById('unmute-all').click();
+        },
+        toggleMute: () => {
+            document.getElementById('mute-mode').click();
+        },
+        setMute: (enabled) => {
+            if (muteMode !== enabled) {
+                document.getElementById('mute-mode').click();
+            }
+        },
         stats: () => {
             const videos = document.querySelectorAll('video');
             const playing = Array.from(videos).filter(v => !v.paused).length;
             const looping = Array.from(videos).filter(v => v.loop).length;
+            const muted = Array.from(videos).filter(v => v.muted).length;
             const paused = videos.length - playing;
             return {
                 total: videos.length,
                 playing,
                 paused,
                 looping,
+                muted,
                 loopMode: loopMode,
+                muteMode: muteMode,
                 autoScrollMode: autoScrollMode,
                 scrollSpeed: scrollSpeed,
                 deleted: deletedElements.size,
